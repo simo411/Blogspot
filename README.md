@@ -1,88 +1,169 @@
 # Blogspot
 
-Welcome to Blogspot! This is a simple web application for creating and viewing blog posts. It allows users to register, login, and create their own blog posts as well as view existing blog posts.
+A blogging app: register, log in, write posts, read everyone else's.
 
-### Features
+**v2** rebuilds the backend as separate containerised services, with a FastAPI API, a dedicated schema/migration service, CI that tests everything against real MySQL, and Kubernetes manifests. The original v1 (a React app + a single Express file) is preserved on the [`main`](../../tree/main) branch. See [From v1 to v2](#from-v1-to-v2) for what changed and why.
 
-- User registration and login functionality.
-- Create, view, and manage blogs.
-- Each blog has a title, body, and author information.
-- Blog authors are associated with their blogs through foreign keys in the database.
-- Secure authentication using tokens stored in `localStorage`.
+## Architecture
 
-### Technologies Used
+```
+                 ┌───────────────────────────────────────┐
+  Browser ─────▶ │ web          nginx + React build      │  the "main face"
+                 │   /        → static app (SPA)         │
+                 │   /api/*   → blog-api                 │  same origin: no CORS,
+                 └───────────────────┬───────────────────┘  no hardcoded URLs
+                                     ▼
+                 ┌───────────────────────────────────────┐
+                 │ blog-api     FastAPI                  │  read/write service
+                 │   auth (JWT) · users · blogs          │  stateless → scales
+                 │   /healthz (live) · /readyz (ready)   │  horizontally
+                 └───────────────────┬───────────────────┘
+                                     ▼
+  ┌──────────────────────┐   ┌───────────────────────────┐
+  │ db-migrations        │──▶│ mysql 8.4                 │
+  │ Alembic, runs once   │   │ own volume / PVC          │
+  │ when MySQL is up,    │   └───────────────────────────┘
+  │ then exits           │
+  └──────────────────────┘
+```
 
-The app is built using the following technologies and libraries:
+**Startup order is enforced, not hoped for:**
+`mysql` healthy → `db-migrations` exits 0 → `blog-api` ready → `web`.
+In Kubernetes the same guarantee comes from the migration **Job** plus the API's
+`/readyz` probe, which only passes once the schema version exists in the database.
 
-- React: A JavaScript library for building user interfaces.
-- React Router: For handling navigation and routing within the app.
-- Express: A Node.js web application framework for building the backend server.
-- MySQL: As the database for storing blog post data.
-- Bcrypt: For securely hashing passwords before storing them in the database.
-- Cors: To enable cross-origin resource sharing in the backend.
-- Body-parser: To parse incoming request bodies in the backend.
+## Repository layout
 
-### Installation
+```
+services/
+  web/             React app, nginx config template, Dockerfile
+  blog-api/        FastAPI service
+    app/
+      api/routes/    HTTP layer: auth, users, blogs, health
+      services/      business rules (ownership checks, login) — no HTTP here
+      repositories/  all SQL lives here
+      core/          config (env vars), security (bcrypt, JWT)
+      models.py      ORM mapping of the schema
+      schemas.py     request/response models (never expose password hashes)
+    tests/
+  db-migrations/   the schema service: Alembic migrations + wait-for-db entrypoint
+deploy/k8s/
+  base/            Deployments, StatefulSet, Job, Services, NetworkPolicy, PDB
+  overlays/local/  kind: namespace, dev secrets, image tags, NodePort
+  kind-config.yaml
+scripts/smoke-test.sh   end-to-end check used locally and in CI
+compose.yaml            local stack
+Makefile                `make help` lists everything
+```
 
-To run the app locally, follow these steps:
+## Run it
 
-1. Clone the repository to your local machine.
-2. Install the necessary dependencies by running the following command in the root directory of the app:
-   ```
-   npm install 
-   ```
-3. Create a MySQL database named `blog_storage` and tables `blog_store` and `members` with cloumns ( id, title, body, author, author_id, posted_on ) and ( m_id, name, usernam, email, password ) respectively and author_id is foregn key in reference to m_id.
-![Screenshot from 2023-08-07 10-25-35](https://github.com/simo411/Blog-App/assets/59970989/99556b89-b512-4c9c-9464-0e3d308e1a1a)
+### Docker Compose
 
+```bash
+cp .env.example .env     # optional; every value has a dev default
+make up                  # docker compose up -d --build
+```
 
-![Screenshot from 2023-08-07 10-26-28](https://github.com/simo411/Blog-App/assets/59970989/341ffcba-95d5-4aa3-993e-d676cf5db523)
+Open **http://localhost:8080**. Interactive API docs (Swagger) are at **http://localhost:8080/api/docs**.
 
+```bash
+make smoke    # end-to-end check through nginx → API → MySQL
+make logs
+make down     # keep data      |  make reset  # also delete the DB volume
+```
 
-5. In the `backend` folder, open the `server.js` file and update the 'db' object with your MySQL database credentials.
-6. Before starting the `server.js` install these:
-   ```
-   npm install express mysql cors nodemon
-   npm install bcrypt
-   ```
-7. Start the backend server by running the following command in the `backend` folder:
-   ```
-   npm start
-   //or
-   yarn start
-   ```
-8. Start the frontend development server by running the following command in the root directory of the app:
-   ```
-   npm install react-router-dom
-   install react-icons --save
-   npm start
-   ```
-9. Open your web browser and navigate to `http://localhost:3000` to access the app.
+### Kubernetes (kind)
 
-### Usage
+Requires [kind](https://kind.sigs.k8s.io/) and `kubectl`.
 
-1. Upon opening the app, you will be directed to the Welcome page. After wich you are lead to login page. If you don't have an account, click the "New here?" link to create one.
-2. After successfully logging in or registering, you will be redirected to the home page where you can view all existing blog posts.
-3. Click on the "Add Blog" button to create a new blog post. Fill in the title and body, and click "Add Blog" to submit the post.
-4. Click on a blog post title to view its details.
-5. In the blog details page, you have the option to delete the blog post of your own if you dont' like it.
-6. You can also navigate to the "Create" page from the navigation bar to add new blog posts.
-7. You can view your profile details on profile page.
+```bash
+make k8s-up      # create cluster, build + load images, deploy, wait for rollout
+make k8s-smoke
+make k8s-status
+make k8s-down
+```
 
-### Images of the website:
-![Screenshot from 2023-08-07 10-46-35](https://github.com/simo411/Blog-App/assets/59970989/b6b3c825-a167-48d8-8a24-d3adb030d70d)
-![Screenshot from 2023-08-07 10-58-17](https://github.com/simo411/Blog-App/assets/59970989/8d873aeb-a968-4a0d-b5cf-c881ca4eef73)
-<br><br><br><br>
+Open **http://localhost:30080**.
 
-![Screenshot from 2023-08-07 10-44-16](https://github.com/simo411/Blog-App/assets/59970989/8f1d921e-7467-4034-9eee-346c37ce958a)
-![Screenshot from 2023-08-07 10-46-05](https://github.com/simo411/Blog-App/assets/59970989/4be9edf8-f74c-4cdf-927a-58af82e883f9)
-<br><br><br><br>
+What gets deployed (namespace `blogspot`):
 
-![Screenshot from 2023-08-07 10-43-47](https://github.com/simo411/Blog-App/assets/59970989/32dd4e64-de46-4abf-8442-3efb780ed442)
-![Screenshot from 2023-08-07 10-44-41](https://github.com/simo411/Blog-App/assets/59970989/1e3d419e-e8bb-452e-8b32-08b917fb7ee3)
-![Screenshot from 2023-08-07 10-44-59](https://github.com/simo411/Blog-App/assets/59970989/203aa87e-c2ff-4d8d-ab1c-67af4b73786f)
+| Object | Why |
+|---|---|
+| `StatefulSet/mysql` + PVC | stable identity and storage that survives pod restarts |
+| `Job/db-migrations` | the schema service; waits for MySQL, migrates, completes |
+| `Deployment/blog-api` | stateless API with liveness/readiness probes, read-only root FS, non-root |
+| `Deployment/web` | nginx serving the SPA and proxying `/api` |
+| `ConfigMap` + generated `Secret`s | config via env; hashed secret names roll pods when values change |
+| `NetworkPolicy` | only `blog-api` and `db-migrations` may reach MySQL |
+| `PodDisruptionBudget` | keeps an API pod up during node drains |
 
+### Without Docker (for development)
 
-Enjoy using My Awesome Blog App! If you encounter any issues or have feedback, feel free to open an issue in the repository.
+```bash
+# API (expects MySQL; or set DATABASE_URL=sqlite:///./dev.db and run the migrations against it)
+cd services/db-migrations && pip install -r requirements.txt && DB_USER=... DB_PASSWORD=... DB_NAME=blogspot ./entrypoint.sh
+cd services/blog-api && pip install -r requirements-dev.txt && JWT_SECRET=$(python -c "import secrets;print(secrets.token_urlsafe(48))") uvicorn app.main:app --reload
 
-But hey still, 
-Happy blogging! 😄
+# Frontend: the CRA dev server proxies /api to localhost:8000
+cd services/web && npm install && npm start
+```
+
+## API
+
+All routes are under `/api`. Endpoints marked 🔒 need `Authorization: Bearer <token>`.
+
+| Method | Path | |
+|---|---|---|
+| POST | `/api/auth/register` | create account → 201, 409 if username/email taken |
+| POST | `/api/auth/login` | → `{access_token, token_type, user}` |
+| GET | `/api/users/me` 🔒 | current user |
+| PATCH | `/api/users/me/avatar` 🔒 | `{ "avatar": 1-5 }` |
+| GET | `/api/blogs?limit=&offset=` | newest first, with author |
+| GET | `/api/blogs/{id}` | |
+| POST | `/api/blogs` 🔒 | `{title, body}`; author comes from the token |
+| DELETE | `/api/blogs/{id}` 🔒 | author only → 204, otherwise 403 |
+| GET | `/healthz`, `/readyz` | liveness / readiness (DB reachable + schema migrated) |
+
+## Schema changes
+
+The schema is owned by `services/db-migrations`. To change it:
+
+```bash
+cd services/db-migrations
+alembic revision -m "add tags to blogs"     # write upgrade()/downgrade() by hand
+make migrate                                 # or just `make up`: it runs on every start
+```
+
+Then update `blog-api/app/models.py` to match. CI runs the API test-suite against a MySQL migrated by this service, so a mismatch fails the build.
+
+## Testing & CI
+
+| | |
+|---|---|
+| `make test-api` | ruff lint + 19 pytest tests (SQLite by default) |
+| `make test-web` | React tests + production build (warnings fail) |
+| GitHub Actions | migrations up → down → up on MySQL 8.4; API tests against that migrated MySQL; frontend build; **full stack in docker compose**; **full stack on a kind cluster**; images pushed to GHCR on `main` |
+
+## From v1 to v2
+
+| | v1 (`main`) | v2 |
+|---|---|---|
+| Backend | one `server.js` | FastAPI service in layers: routes → services → repositories |
+| Schema | created by hand from README screenshots | versioned Alembic migrations in their own service |
+| Auth | the "token" was the string `'token'`; any client could delete any blog or change any avatar | bcrypt + JWT; the server derives the user from the token and checks ownership |
+| Data exposure | `GET /login/:username` returned the password hash to anyone | password hashes never leave the API |
+| DB access | single connection; `throw err` in callbacks crashed the process | connection pool with pre-ping; errors become HTTP responses |
+| Config | credentials and `localhost:8000` hardcoded (9 places) | environment variables; frontend calls relative `/api` |
+| Frontend | logged out on refresh; pages crashed when logged out | session restored from token; protected routes |
+| Repo | ~38,600 `node_modules` files committed (inside `public/`) | dependencies installed at build time |
+| Running it | manual MySQL setup + two terminals | `make up` or `make k8s-up` |
+| Quality gates | none | lint, unit tests, migration round-trip, compose + Kubernetes end-to-end in CI |
+
+## Roadmap
+
+- **AWS**: images to ECR, run on EKS (or ECS), replace the MySQL StatefulSet with RDS, secrets from Secrets Manager, all provisioned with Terraform; add an `overlays/aws`.
+- **More services**: split `auth`/`users` out of `blog-api`; add a read-optimised blog feed when traffic warrants it.
+- **Traffic**: Gateway API (or the AWS Load Balancer Controller on EKS) in front of `web`.
+- **Ops**: structured JSON logs, Prometheus metrics + Grafana, HorizontalPodAutoscaler.
+- **Frontend**: move from Create React App (unmaintained) to Vite.

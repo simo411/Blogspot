@@ -1,0 +1,79 @@
+# Blogspot v2 — local stack.
+#   docker compose up --build      → http://localhost:8080  (API docs: /api/docs)
+#
+# Startup order (enforced, not hoped for):
+#   mysql (healthy) → db-migrations (exits 0) → blog-api (healthy) → web
+#
+# Every ${VAR:-default} can be overridden from .env (see .env.example).
+
+name: blogspot
+
+x-db-env: &db-env
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_NAME: ${MYSQL_DATABASE:-blogspot}
+  DB_USER: ${MYSQL_USER:-blogspot}
+  DB_PASSWORD: ${MYSQL_PASSWORD:-blogspot-dev-password}
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-blogspot}
+      MYSQL_USER: ${MYSQL_USER:-blogspot}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-blogspot-dev-password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root-dev-password}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # TCP (127.0.0.1), not the socket: during first-boot init MySQL runs a temporary
+      # server without networking, so this only passes once the real server is up.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    # Not published to the host. To poke at it: docker compose exec mysql mysql -ublogspot -p
+    restart: unless-stopped
+
+  # The "schema service": applies Alembic migrations, then exits 0.
+  db-migrations:
+    build: ./services/db-migrations
+    image: blogspot/db-migrations:dev
+    environment:
+      <<: *db-env
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
+  blog-api:
+    build: ./services/blog-api
+    image: blogspot/blog-api:dev
+    environment:
+      <<: *db-env
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-dev-only-secret}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      db-migrations:
+        condition: service_completed_successfully
+    # Internal only; the browser reaches it through web's /api proxy.
+    expose: ["8000"]
+    restart: unless-stopped
+
+  web:
+    build: ./services/web
+    image: blogspot/web:dev
+    environment:
+      API_UPSTREAM: blog-api:8000
+    depends_on:
+      blog-api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    restart: unless-stopped
+
+volumes:
+  mysql-data:

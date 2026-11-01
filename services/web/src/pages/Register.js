@@ -1,31 +1,21 @@
 import React, { useState } from "react";
 import { useHistory } from "react-router-dom";
+import { api } from "../api";
 
 const Register = () => {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState(null);
   const history = useHistory();
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const newUser = { name, username, email, password };
-
-    fetch('http://localhost:8000/register', {
-      method: 'POST',
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newUser)
-    })
-    .then((response) => response.json())
-    .then((data) => {
-      // Redirect to a different page after successful registration 
-      history.push('/login');
-    })
-    .catch((error) => {
-      console.error('Error registering user:', error);
-    });
-  }
+    api.register({ name, username, email, password })
+      .then(() => history.push('/login'))
+      .catch((err) => setError(err.message));
+  };
 
   return (
     <div className="register">
@@ -42,6 +32,8 @@ const Register = () => {
         <input
           type="text"
           required
+          minLength={3}
+          autoComplete="username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
         />
@@ -56,10 +48,13 @@ const Register = () => {
         <input
           type="password"
           required
+          minLength={8}
+          autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
         <button type="submit">Register</button>
+        {error && <p className="red-alert">{error}</p>}
       </form>
     </div>
   );

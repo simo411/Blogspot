@@ -8,7 +8,7 @@ import BlogDetails from './pages/BlogDetails';
 import NotFound from './Components/NotFound';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import { AuthProvider } from './context/AuthContext';
+import ProtectedRoute from './Components/ProtectedRoute';
 import Start from './pages/Start';
 import Profile from './pages/Profile';
 
@@ -30,8 +30,7 @@ function App() {
     document.body.className = theme;
   },[theme])
   return (
-    <AuthProvider>
-      <Router>
+    <Router>
         <div className={"App"}>
           <Navbar />
           <div className="content">
@@ -39,24 +38,24 @@ function App() {
               <Route exact path="/">
                 <Start />
               </Route>
-              <Route exact path="/home">
+              <ProtectedRoute exact path="/home">
                 <Home />
-              </Route>
-              <Route path="/create">
+              </ProtectedRoute>
+              <ProtectedRoute path="/create">
                 <Create />
-              </Route>
-              <Route path="/blogs/:id">
+              </ProtectedRoute>
+              <ProtectedRoute path="/blogs/:id">
                 <BlogDetails />
-              </Route>
+              </ProtectedRoute>
               <Route path="/login">
                 <Login />
               </Route>
               <Route path="/register">
                 <Register />
               </Route>
-              <Route path="/profile">
+              <ProtectedRoute path="/profile">
                 <Profile />
-              </Route>
+              </ProtectedRoute>
               <Route path="*">
                 <NotFound />
               </Route>
@@ -66,8 +65,7 @@ function App() {
             <button className={theme === 'dark-theme' ? 'sun' : 'moon'} onClick={toggleTheme}></button>
           </div>
         </div>
-      </Router>
-    </AuthProvider>
+    </Router>
   );
 }
 

@@ -3,14 +3,12 @@ import { Link, useHistory } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 
 const Navbar = () => {
-  const { user, setUser } = useContext(AuthContext);
+  const { user, logout } = useContext(AuthContext);
   const history = useHistory();
   const [isDropdownOpen, setDropdownOpen] = useState(false);
 
   const handleLogout = () => {
-    // Clear the user context and remove the authentication token from local storage
-    setUser(null);
-    localStorage.removeItem('authToken');
+    logout(); // clears the token and the user
     // Redirect to the login page after logging out
     history.push('/login');
   };

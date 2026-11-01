@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: blog-api
+  labels:
+    app.kubernetes.io/name: blog-api
+spec:
+  selector:
+    app.kubernetes.io/name: blog-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blog-api
+  labels:
+    app.kubernetes.io/name: blog-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: blog-api
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: blog-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: blog-api
+          image: blogspot/blog-api
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef: { name: blogspot-config }
+          env:
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: blogspot-db, key: MYSQL_USER }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: blogspot-db, key: MYSQL_PASSWORD }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: blogspot-jwt, key: JWT_SECRET }
+          # Liveness never touches the DB, so a DB outage doesn't cause a restart storm.
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            timeoutSeconds: 3
+          # Ready only once MySQL is reachable AND db-migrations has run.
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# Keep at least one API pod running during node drains / cluster upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: blog-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: blog-api

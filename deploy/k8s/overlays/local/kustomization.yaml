@@ -1,0 +1,51 @@
+# Local cluster (kind). Usage: make k8s-up   → http://localhost:30080
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: blogspot
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+# Images built locally and loaded into kind with `kind load docker-image`.
+images:
+  - name: blogspot/db-migrations
+    newTag: dev
+  - name: blogspot/blog-api
+    newTag: dev
+  - name: blogspot/web
+    newTag: dev
+
+# DEV-ONLY credentials. Real environments must not commit secrets:
+# use External Secrets / Sealed Secrets, or AWS Secrets Manager on EKS.
+# The generated names get a content hash, so changing a value rolls the pods.
+secretGenerator:
+  - name: blogspot-db
+    literals:
+      - MYSQL_USER=blogspot
+      - MYSQL_PASSWORD=blogspot-dev-password
+      - MYSQL_ROOT_PASSWORD=root-dev-password
+  - name: blogspot-jwt
+    literals:
+      - JWT_SECRET=dev-only-secret-change-me-dev-only-secret
+
+patches:
+  # Expose the web Service on a fixed NodePort that kind maps to the host.
+  - target:
+      kind: Service
+      name: web
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: NodePort
+      - op: add
+        path: /spec/ports/0/nodePort
+        value: 30080
+  # One replica of each is plenty on a laptop.
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1

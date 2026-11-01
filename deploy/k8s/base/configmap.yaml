@@ -1,0 +1,12 @@
+# Non-secret settings shared by the services. Secrets (passwords, JWT key)
+# come from Secrets created by the overlay.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blogspot-config
+data:
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_NAME: blogspot
+  JWT_EXPIRE_MINUTES: "60"
+  LOG_LEVEL: info

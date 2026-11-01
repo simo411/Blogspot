@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Environment-independent manifests. Overlays (overlays/local, later overlays/aws)
+# add secrets, image tags and environment-specific patches.
+resources:
+  - configmap.yaml
+  - mysql.yaml
+  - db-migrations-job.yaml
+  - blog-api.yaml
+  - web.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: blogspot
+    includeSelectors: false
